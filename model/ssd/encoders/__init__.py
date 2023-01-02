@@ -27,3 +27,18 @@ class Encoder(nn.Module):
         
     def forward(self, x):
         return self.layers(x)
+    
+    
+def get_encoder(encoder_config):
+    if encoder_config['type'] == 'repeat':
+        encoder = RepeatEncoder
+    elif encoder_config['type'] == 'dense':
+        encoder = DenseEncoder
+    elif encoder_config['type'] == 'convolution':
+        encoder = ConvEncoder
+    return encoder(**encoder_config['kwargs'])
+
+
+def get_decoder(decoder_config):
+    # Same classes for both
+    return get_encoder(decoder_config)

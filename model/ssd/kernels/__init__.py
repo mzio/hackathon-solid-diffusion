@@ -1,8 +1,10 @@
 from .shift import *
-from .scale_shift import *
+from .shift_dilated import *
 from .companion import *
-from .diagonal_discrete import *
-from .diagonal_continuous import *
+
+# Not implemented yet
+# from .diagonal_discrete import *
+# from .diagonal_continuous import *
 
 
 def get_kernel(kernel_name):

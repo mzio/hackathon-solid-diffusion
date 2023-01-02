@@ -74,8 +74,12 @@ class PositionEmbedding(Embedding):
         # Assume input is shape B x C x N x T x L
         b, c, n, t, l = x.shape
         assert n == self.n_positions
-        x = repeat(torch.arange(n), 'n -> b c n t', b=b, c=c, t=t)
-        return self.layers(x)
+        x = repeat(torch.arange(n), 'n -> b c n t', b=b, c=c, t=t).to(x.device)
+        self.layers.to(x.device)
+        x = self.layers(x)
+        self.layers.to(torch.device('cpu'))
+        return x
+                       
     
     
 class PatchEmbedding(nn.Module): 
@@ -143,14 +147,14 @@ class ModelEmbedding(nn.Module):
         
         self.output_dim = output_dim   # HACK: testing
             
-    def position_embedding(self, x):
+    def get_position_embedding(self, x):
         if self.init_position is False:
-            self._position_embedding = PositionEmbedding(
+            self.position_embedding = PositionEmbedding(
                 self.patch_embedding.n_patches,
                 self.patch_embedding.patch_len,
             )
             self.init_position = True
-        return self._position_embedding(x)
+        return self.position_embedding(x)
             
     def forward(self, x):  # Assume x is B x C x H x W x T
         """
@@ -166,7 +170,7 @@ class ModelEmbedding(nn.Module):
         
         # Add positional embeddings
         if self.position_kwargs is not None:
-            x += self.position_embedding(x)
+            x += self.get_position_embedding(x)
             
         if self.bidirectional:
             x_r = torch.flip(x, [4])  # Reverse each unrolled patch
