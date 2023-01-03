@@ -73,11 +73,11 @@ class PositionEmbedding(Embedding):
     def forward(self, x):
         # Assume input is shape B x C x N x T x L
         b, c, n, t, l = x.shape
-        assert n == self.n_positions
+        # assert n == self.n_positions  # N can be number of patches or number of pixels
         x = repeat(torch.arange(n), 'n -> b c n t', b=b, c=c, t=t).to(x.device)
         self.layers.to(x.device)
         x = self.layers(x)
-        self.layers.to(torch.device('cpu'))
+        self.layers.cpu()
         return x
                        
     
@@ -95,10 +95,14 @@ class PatchEmbedding(nn.Module):
                  stride: int=1):
         super().__init__()
         self.patch_size = patch_size
-        self.unfold = nn.Unfold(kernel_size=patch_size,
-                                dilation=dilation,
-                                padding=padding,
-                                stride=stride)
+        self.dilation   = dilation
+        self.padding    = padding
+        self.stride     = stride
+        self.unfold     = nn.Unfold(kernel_size=patch_size,
+                                    dilation=dilation,
+                                    padding=padding,
+                                    stride=stride)
+        self.fold   = None  # Initialize in first forward pass
         self.T = False
         
     def forward(self, x):
@@ -115,9 +119,17 @@ class PatchEmbedding(nn.Module):
             b, c, n, t, l = x.shape
         else:
             b, c, n, l = x.shape
-        # Helpful for positional embeddings    
-        self.n_patches = n  
-        self.patch_len = l
+        # Helpful for positional embeddings and folding 
+        self.n_channels = c
+        self.patch_len  = l
+        self.n_patches  = n  
+        
+        if self.fold is None:
+            self.fold = nn.Fold(output_size=(h, w), 
+                                kernel_size=self.patch_size,
+                                dilation=self.dilation,
+                                padding=self.padding,
+                                stride=self.stride)
         return x
     
     
@@ -130,7 +142,7 @@ class ModelEmbedding(nn.Module):
                  linear_kwargs:   dict=None,
                  position_kwargs: dict=None,
                  bidirectional:   bool=False,
-                 output_dim:      str='bld'):  # HACK: testing
+                 output_shape:    str='bld'):  # HACK: testing
         super().__init__()
         self.patch_kwargs    = patch_kwargs
         self.linear_kwargs   = linear_kwargs
@@ -145,21 +157,24 @@ class ModelEmbedding(nn.Module):
         # Initialize position embedding object after first pass
         self.init_position = False
         
-        self.output_dim = output_dim   # HACK: testing
+        self.output_shape = output_shape   # HACK: testing
             
     def get_position_embedding(self, x):
         if self.init_position is False:
-            self.position_embedding = PositionEmbedding(
-                self.patch_embedding.n_patches,
-                self.patch_embedding.patch_len,
-            )
+            if self.position_kwargs['n_positions'] is None:
+                n_positions = self.patch_embedding.n_patches
+                embedding_dim = self.patch_embedding.patch_len
+            else:
+                n_positions = self.position_kwargs['n_positions']
+                embedding_dim = self.position_kwargs['embedding_dim']
+            self.position_embedding = PositionEmbedding(n_positions, embedding_dim)
             self.init_position = True
         return self.position_embedding(x)
             
     def forward(self, x):  # Assume x is B x C x H x W x T
         """
         Input  is size B x C x H x W x T
-        Output is size B x L x D if self.output_dim == 'bld'
+        Output is size B x L x D if self.output_shape == 'bld'
         """
         # Patchify images
         x = self.patch_embedding(x)  # B x C x N x T x L
@@ -170,13 +185,18 @@ class ModelEmbedding(nn.Module):
         
         # Add positional embeddings
         if self.position_kwargs is not None:
+            # Only works if position embedding is same shape as linear embedding or pos embedding_dim is 1
             x += self.get_position_embedding(x)
             
         if self.bidirectional:
             x_r = torch.flip(x, [4])  # Reverse each unrolled patch
             x   = rearrange([x, x_r], 'r b c n t l -> b c (n r) t l')
             
-        if self.output_dim == 'bld':   # HACK: testing
+        if self.output_shape == 'bt(cnl)':
+            x = rearrange(x, 'b c n t l -> b t (c n l)')
+            _, self.sample_len, self.sample_dim = x.shape
+            
+        elif self.output_shape == 'bld':   # HACK: testing
             # Should change to this one 
             # -> saves one less rearrange because encoder takes input B x L x D
             x = rearrange(x, 'b c n t l -> b (t l) (c n)')
@@ -185,5 +205,31 @@ class ModelEmbedding(nn.Module):
             x = rearrange(x, 'b c n t l -> b (c n) (t l)')
             _, self.sample_dim, self.sample_len = x.shape
         return x 
+    
+    def unpatch(self, x):
+        # Assume x is shape: B x T x (C N L)
+        b, t, d = x.shape
+        # assert self.patch_embedding.fold is not None
+        x = rearrange(x, 'b t (c n l) -> (b t) (c l) n',
+                      c=self.patch_embedding.n_channels,
+                      l=self.patch_embedding.patch_len,
+                      n=self.patch_embedding.n_patches)
+        x = self.patch_embedding.fold(x)  # 
+        x = rearrange(x, '(b t) c h w -> b c h w t', b=b, t=t)
+        return x
+    
+    def patch(self, x):
+        # assume x is shape: B x C x H x W x T
+        x = self.patch_embedding(x)  # B x C x N x T x L
+        print(x.shape)
+        if self.output_shape == 'bt(cnl)':
+            x = rearrange(x, 'b c n t l -> b t (c n l)')
+        elif self.output_shape == 'bld':   
+            x = rearrange(x, 'b c n t l -> b (t l) (c n)')
+        else:
+            x = rearrange(x, 'b c n t l -> b (c n) (t l)')
+        return x
+        
+        
         
             
