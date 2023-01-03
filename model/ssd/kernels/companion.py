@@ -1,5 +1,6 @@
 import torch
 import opt_einsum as oe
+from einops import rearrange
 
 from model.ssd.kernels.base import Kernel
 from model.functional.krylov import krylov
@@ -45,7 +46,7 @@ class CompanionKernel(Kernel):
     def norm(self, x, ord=1):
         # x.shape = C x H x D
         x_norm = torch.linalg.norm(x, ord=ord, dim=2, keepdim=True)
-        x = x / x_norm if x_norm[:, 0].item() != 0 else x 
+        x = x / x_norm  # if x_norm[:, 0].item() != 0 else x 
         return x
     
     def matrix_power(self, l, c, b, a):

@@ -4,12 +4,6 @@ from model.ssd.encoders import *
 from model.ssd.kernels import *
 
 
-"""
-from model.ssd.kernels import *
-from model.ssd.encoders import *
-"""
-
-
 class SSDLayer(nn.Module):
     def __init__(self, 
                  kernel: dict,
@@ -26,6 +20,9 @@ class SSDLayer(nn.Module):
         self.decoder = self.get_decoder()
         
         self.inference_only = False
+        
+        # Bug with shape matching
+        assert self.skip_connection is False
     
     def get_kernel(self):
         if self.kernel_args['type'] == 'companion':
@@ -50,16 +47,25 @@ class SSDLayer(nn.Module):
         
     def forward(self, u, y_=None, u_=None):  # 
         # Assume input shape is (B, L, H)
-        y     = rearrange(u, 'b l h -> b h l')
-        y, *z = self.kernel(y)  # could output multiple, so should modify this
+        try:
+            u     = rearrange(u, 'b l h -> b h l')
+        except Exception as e:
+            print(type(u))
+            print(u)
+            raise e
+            
+        y, *z = self.kernel(u)  # could output multiple, so should modify this
         y     = rearrange(y, 'b h l -> b l h')
-        y     = self.decoder(x)
-        if self.skip_connection:
-            y = y + u
+        y     = self.decoder(y)
+        # if self.skip_connection:  # Bug with shape matching
+        #     y = y + u
             
         if self.closed_loop and not self.inference_only:  # if len(z) == 2 and z[1] is not None:
             # Hacky, output open-loop prediction
             # z[0] will be the closed-loop prediction for the next input
-            y_ = rearrange(z[1], 'b h l -> b l h')  
+            y_ = rearrange(z[1], 'b h l -> b l h')
+            y_ = self.decoder(y_)
+            # if self.skip_connection:  # Bug with shape matching
+            #     y_ = y_ + u
         return y, y_, z[0] # u_
                  
