@@ -63,9 +63,12 @@ class SSDLayer(nn.Module):
         if self.closed_loop and not self.inference_only:  # if len(z) == 2 and z[1] is not None:
             # Hacky, output open-loop prediction
             # z[0] will be the closed-loop prediction for the next input
+            u_ = rearrange(z[0], 'b h l -> b l h')
+            # z[1] is closed-loop output of last layer
             y_ = rearrange(z[1], 'b h l -> b l h')
             y_ = self.decoder(y_)
             # if self.skip_connection:  # Bug with shape matching
             #     y_ = y_ + u
-        return y, y_, z[0] # u_
+            
+        return y, y_, u_ # u_
                  

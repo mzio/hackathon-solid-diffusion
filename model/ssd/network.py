@@ -3,7 +3,7 @@
 """
 import torch.nn as nn
 
-from model.ssd.embedding import ModelEmbedding
+from model.ssd.embeddings.model import ModelEmbedding
 from model.ssd.encoders import *
 from model.ssd.layer import SSDLayer
 
@@ -92,6 +92,7 @@ class StateSpaceDiffusion(nn.Module):
         y, y_, u_ = None, None, None  # Initialize outputs
         
         u = self.input_embedding(u)  # B, C, H, W -> B, (LT), (NC * 2); i.e., (B, L, D)
+        
         u = self.input_encoder(u)    # B, L, D -> B, L, D
         
         # Compute SSD outputs
