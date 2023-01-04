@@ -121,7 +121,7 @@ class ShiftKernel(CompanionKernel):
             if not self.inference_only:
                 # u_ = torch.einsum('...nl, ...n -> ...l', x, self.k).contiguous()
                 # u_ = rearrange(u_, 'b c h l -> b l (c h)')  # Save 1 extra rearrange
-                u_ = krylov(l, self.norm(self.A + BK), x1, c=self.k)
+                u_ = krylov(l, self.norm(self.A + BK), x1, c=self.k)  # B H L
                 
                 # Compute open-loop
                 y_ = self.convolve(u, self.A, l)  # .cpu()  # Move back to gpu before loss
@@ -132,5 +132,5 @@ class ShiftKernel(CompanionKernel):
         # 1. Closed-loop output prediction (if closed-loop, else open-loop)
         # 2. 2nd-to-last layer prediction
         # 3. Open-loop output prediction
-        return y, u_, y_
+        return y, u_, y_  # y, z[0], z[1]
             
