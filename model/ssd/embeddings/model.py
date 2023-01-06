@@ -50,6 +50,7 @@ class ModelEmbedding(nn.Module):
             self.position_embedding = get_position_embedding(self.position_kwargs['type'], **kwargs)
             # self.position_embedding = PositionEmbedding(n_positions, embedding_dim)
             self.init_position = True
+            
         return self.position_embedding(x)
             
     def forward(self, x):  # Assume x is B x C x H x W x T

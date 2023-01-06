@@ -75,7 +75,7 @@ class DDPMScheduler():
         self.sqrt_alpha_cumprod_t = self.sqrt_alpha_cumprod_t.cpu()
         self.sqrt_one_minus_alpha_cumprod_t = self.sqrt_one_minus_alpha_cumprod_t.cpu()
 
-        return noisy_samples, noise  # B x C x H x W x T
+        return noisy_samples, noise, self.beta_t # B x C x H x W x T
     
     def get_forward_samples(self, 
                             samples: torch.FloatTensor,
@@ -91,7 +91,7 @@ class DDPMScheduler():
             # Hardcode for images, shape: B x C x H x W x T
             samples = repeat(samples, 'b c h w -> b c h w t', t=len(sample_t))
             
-        noisy_samples, noise_samples = self.add_noise(samples, None, sample_t)
+        noisy_samples, noise_samples, noise_var = self.add_noise(samples, None, sample_t)
         
         # Compute means -> 1st mean will be 0 matrix
         # (1 / (1 - abar_t)) * sqrt(a_t) (1 - abar_{t-1}) x_t + \sqrt{abar_{t - 1}} * (1 - a_t) x_0
@@ -101,4 +101,4 @@ class DDPMScheduler():
         mean_samples = ((1 / self.one_minus_alpha_cumprod_t[sample_t]) * 
                         (weight_t * noisy_samples + weight_0 * samples))
         
-        return noisy_samples, mean_samples, noise_samples
+        return noisy_samples, mean_samples, noise_samples, noise_var

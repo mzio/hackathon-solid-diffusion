@@ -10,6 +10,7 @@ from model.functional.krylov import krylov
 class ShiftKernel(CompanionKernel):
     def __init__(self, n_hidden_state, **kwargs):
         self.n_hidden_state = n_hidden_state
+        self.target_length = None
         super().__init__(**kwargs)
         
     def init_weights(self):
@@ -87,7 +88,10 @@ class ShiftKernel(CompanionKernel):
     
     def forward(self, u):
         ch, h, d = self.b.shape
-        b , d, l = u.shape
+        b,  d, l = u.shape
+        
+        # Inference
+        if self.target_length is not None: l = self.target_length
         
         # Outputs
         y, y_, u_ = None, None, None
@@ -108,7 +112,6 @@ class ShiftKernel(CompanionKernel):
             x1 = rearrange(x1, 'b c h l -> b (c h) l')
             # Compute CBu, C(A + BK)x_1, ..., C(A + BK)^(l-1)x_1
             y  = krylov(l, self.norm(self.A + BK), x1, c=self.c) 
-            # print('y.shape', y.shape)
             
             # # Old way to do this (memory-wise more expensive because initializes hidden-state x?
             # # But twice as slow bc does computation twice

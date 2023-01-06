@@ -1,5 +1,5 @@
 """
-python main.py --classes 5 --samples_per_class 3200 --batch_size 32 --d_kernel 2 --n_heads 2 --embedding_dim 2 --embedding_type learn_1d --n_positions 784
+python main.py --classes 0 4 --samples_per_class 3200 --batch_size 32 --d_kernel 8 --n_heads 2 --embedding_dim 2 --embedding_type learn_1d --n_positions 784 --criterion_weights 1 1 1000 1
 """
 import os
 import time
@@ -38,11 +38,15 @@ def initialize_args():
     parser.add_argument('--beta_start', type=float, default=1e-5)
     parser.add_argument('--beta_end', type=float, default=1e-2)
     parser.add_argument('--timesteps', type=float, default=1000)
+    ## Ours
+    parser.add_argument('--beta_weight_loss', action='store_true', default=False)
+    parser.add_argument('--predict_sample', action='store_true', default=False)
                         
     # Optimizer
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--weight_decay', type=float, default=5e-5)
+    parser.add_argument('--criterion_weights', nargs='+')
     
     # Model
     parser.add_argument('--d_kernel', type=int, default=4)
@@ -60,6 +64,7 @@ def initialize_args():
     parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints')
     parser.add_argument('--generation_dir', type=str, default='./images')
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--replicate', type=int, default=0)
     parser.add_argument('--no_wandb', action='store_true', default=False)
     args = parser.parse_args()
     return args
@@ -83,8 +88,11 @@ def main():
     args = initialize_args()
     seed_everything(args.seed)
     classes = '_'.join(args.classes)
+    criterion_weights = '_'.join(args.criterion_weights)
+    diffusion_args = f'dsc={args.diffusion_scheduler}-beta=({args.beta_start}_{args.beta_end})-ts={args.timesteps}-bwl={int(args.beta_weight_loss)}-pds={int(args.predict_sample)}'
+    args.criterion_weights = [float(w) for w in args.criterion_weights]
     args.project_name = f'ssd-d={classes}-spc={args.samples_per_class}'
-    args.run_name     = f'kd={args.d_kernel}-nh={args.n_heads}-ps={args.patch_size}-ed={args.embedding_dim}-et={args.embedding_type}-op={args.optimizer}-lr={args.lr}-wd={args.weight_decay}-dsc={args.diffusion_scheduler}-beta=({args.beta_start}-{args.beta_end})-ts={args.timesteps}-sd={args.seed}'
+    args.run_name     = f'kd={args.d_kernel}-nh={args.n_heads}-ps={args.patch_size}-ed={args.embedding_dim}-et={args.embedding_type}-cw={criterion_weights}-me={args.max_epochs}-op={args.optimizer}-lr={args.lr}-wd={args.weight_decay}-{diffusion_args}-sd={args.seed}'
         
     init_wandb(args)
     
@@ -96,7 +104,7 @@ def main():
     test_dataset  = torchvision.datasets.MNIST(root=args.data_dir, train=False, 
                                                transform=transform, download=False)
     train_class_indices = [np.where(train_dataset.targets == int(t))[0] for t in args.classes]
-    test_class_indices  = [np.where(train_dataset.targets == int(t))[0] for t in args.classes]
+    test_class_indices  = [np.where(test_dataset.targets == int(t))[0] for t in args.classes]
     # print(f'Total training samples: {train_class_indices}')
     print(f'Random sample: {np.random.choice(train_dataset.targets[np.concatenate(train_class_indices)], size=20)}')
     
@@ -123,7 +131,7 @@ def main():
                 encoder_config=encoder_config,
                 decoder_config=decoder_config,
                 ssd_layer_config=ssd_config)
-    print(model)
+    print_args(args)
     
     # LOAD OPTIMIZER
     optim_config = {
@@ -136,10 +144,19 @@ def main():
     train_config = {
         'dataloader': None,  # Fill-in / update below 
         'optimizer': optimizer, 
-        'criterion': torch.nn.MSELoss(reduction='mean'), 
-        'criterion_weights': [1., 1., 1000., 1.], 
+        'criterion': torch.nn.MSELoss(reduction='none'), 
+        'criterion_weights': args.criterion_weights,  # [1., 1., 10., 10.], 
+        'beta_weight_loss': args.beta_weight_loss,
         'device': torch.device('cuda:0') if torch.cuda.is_available() else False
     }
+    
+    if train_config['criterion_weights'] == [0, 0, 1, 0]:
+        model.set_inference_only(mode=True)  # HACK
+    component_names = ['SSD Encoder', 'SSD Decoder']
+    for ix, component in enumerate([model.ssd_encoder, model.ssd_decoder]):
+        for layer_ix in range(len(component)):
+            print(f'{component_names[ix]}, kernel layer {layer_ix}, closed-loop only: {component[layer_ix].inference_only}, requires_grad: {component[layer_ix].kernel.requires_grad}')
+    print(f'Model closed-loop only: {model.inference_only}')   
     
     pbar = tqdm(range(args.max_epochs))
     for epoch in pbar:
@@ -156,27 +173,54 @@ def main():
             # Get samples and time it
             start_time = time.time()
             print('** Running forward diffusion process **')
-            noisy, means, noise = scheduler.get_forward_samples(samples, sampling_timesteps)
+            noisy, means, noise, noise_var = scheduler.get_forward_samples(samples, sampling_timesteps)
             print(f"-- Epoch: {epoch} | Generating {len(sampling_timesteps) * len(samples)} samples took {time.time() - start_time:3f} seconds --")
             
-            dataloader = [
-                (noisy[ix * args.batch_size: (ix + 1) * args.batch_size], 
-                 means[ix * args.batch_size: (ix + 1) * args.batch_size])
-                for ix in range(len(data_indices) // args.batch_size)
-            ]
+            if args.predict_sample is True:  # need to flip them because we flip them later in train loop
+                # dataloader = [
+                #     (noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., :args.timesteps-1], 
+                #      noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., 1:args.timesteps],
+                #      noise_var[..., :args.timesteps-1])
+                #     for ix in range(len(data_indices) // args.batch_size)
+                # ]
+                dataloader = [
+                    (noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., 1:args.timesteps], 
+                     noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., :args.timesteps-1],
+                     noise_var[..., :args.timesteps-1])
+                    for ix in range(len(data_indices) // args.batch_size)
+                ]
+                        
+            else:
+                dataloader = [
+                    (noisy[ix * args.batch_size: (ix + 1) * args.batch_size], 
+                     means[ix * args.batch_size: (ix + 1) * args.batch_size],
+                     noise_var)
+                    for ix in range(len(data_indices) // args.batch_size)
+                ]
         else:
             shuffle_indices = np.arange(len(data_indices))
-            print(shuffle_indices)
+            # print(shuffle_indices)
             np.random.shuffle(shuffle_indices)
-            print(shuffle_indices)
+            # print(shuffle_indices)
             # hacky because randomness compounds
             _noisy = noisy[shuffle_indices]
             _means = means[shuffle_indices]
-            dataloader = [
-                (_noisy[ix * args.batch_size: (ix + 1) * args.batch_size], 
-                 _means[ix * args.batch_size: (ix + 1) * args.batch_size])
-                for ix in range(len(data_indices) // args.batch_size)
-            ]
+            # _noise_var = noise_var[shuffle_indices]
+                        
+            if args.predict_sample:
+                dataloader = [
+                    (_noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., 1:args.timesteps], 
+                     _noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., :args.timesteps-1],
+                     noise_var[..., :args.timesteps-1])
+                    for ix in range(len(data_indices) // args.batch_size)
+                ]
+            else:
+                dataloader = [
+                    (_noisy[ix * args.batch_size: (ix + 1) * args.batch_size], 
+                     _means[ix * args.batch_size: (ix + 1) * args.batch_size],
+                     noise_var)
+                    for ix in range(len(data_indices) // args.batch_size)
+                ]
             
         train_config['dataloader'] = dataloader
         if epoch == 0:
@@ -205,7 +249,7 @@ def main():
             
     
 def print_args(args):
-    attributes = [a for a in dir(args) if a[:2] != '__']
+    attributes = [a for a in dir(args) if a[:1] != '_']
     print('ARGPARSE ARGS')
     for ix, attr in enumerate(attributes):
         fancy = '└──' if ix == len(attributes) - 1 else '├──'

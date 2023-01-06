@@ -29,10 +29,19 @@ class StateSpaceDiffusion(nn.Module):
         
     def set_inference_only(self, mode: bool=False):
         for ix in range(len(self.ssd_encoder)):
-            self.ssd_encoder[ix].inference_only = mode
+            self.ssd_encoder[ix].inference_only        = mode
+            self.ssd_encoder[ix].kernel.inference_only = mode
+            # self.ssd_encoder[ix].kernel.requires_grad  = not mode
         for ix in range(len(self.ssd_decoder)):
-            self.ssd_decoder[ix].inference_only = mode
+            self.ssd_decoder[ix].inference_only        = mode
+            self.ssd_encoder[ix].kernel.inference_only = mode
+            # self.ssd_decoder[ix].kernel.requires_grad  = not mode
         self.inference_only = mode
+        self.requires_grad  = not mode
+        
+    def set_inference_length(self, length: int):
+        for ix in range(len(self.ssd_decoder)):
+            self.ssd_decoder[ix].kernel.target_length = length
         
     def init_embeddings(self):
         embed_kwargs = {}
@@ -104,7 +113,9 @@ class StateSpaceDiffusion(nn.Module):
         #     y, y_, z_pred = self.ssd_decoder(z)
         y, y_, z_pred = self.ssd_decoder(z)
         y  = self.input_decoder(y)
-        y_ = self.input_decoder(y_)
+        
+        if not self.inference_only:
+            y_ = self.input_decoder(y_)
         
         # if self.closed_loop is True, returns:
         # closed-loop output, open-loop output, 
