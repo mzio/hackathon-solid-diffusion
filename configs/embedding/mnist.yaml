@@ -1,0 +1,20 @@
+patch:
+  patch_size: 4
+  dilation: 1
+  padding: 0
+  stride: 4
+linear:
+  input_dim: 16
+  output_dim: 
+  - 16
+  - 2
+  identity_init: true
+  identity_val: 1
+position:
+  type: linear_1d
+  n_positions: 784
+  embedding_dim: 2
+bidirectional: false
+output_shape: bt(cnl)
+  
+  

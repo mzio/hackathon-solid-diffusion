@@ -1,0 +1,5 @@
+type: repeat
+kwargs:
+  input_dim: 784
+  output_dim: 784
+  input_shape: bld
