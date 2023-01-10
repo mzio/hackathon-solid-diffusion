@@ -18,7 +18,7 @@ class StateSpaceDiffusion(nn.Module):
         self.embedding_config = embedding_config
         self.encoder_config   = encoder_config
         self.decoder_config   = decoder_config
-        self.ssd_layer_config = ssd_layer_config
+        self.ssd_layer_config = ssd_layer_config  # hack
         
         self.input_embedding = self.init_embeddings()
         self.input_encoder   = self.init_encoder()
@@ -28,13 +28,17 @@ class StateSpaceDiffusion(nn.Module):
         self.inference_only = False
         
     def set_inference_only(self, mode: bool=False):
-        for ix in range(len(self.ssd_encoder)):
-            self.ssd_encoder[ix].inference_only        = mode
-            self.ssd_encoder[ix].kernel.inference_only = mode
-            # self.ssd_encoder[ix].kernel.requires_grad  = not mode
+        try:
+            for ix in range(len(self.ssd_encoder)):
+                self.ssd_encoder[ix].inference_only        = mode
+                self.ssd_encoder[ix].kernel.inference_only = mode
+                # self.ssd_encoder[ix].kernel.requires_grad  = not mode
+        except AttributeError:
+            pass  # Will fail if ssd_encoder is identity  
+        
         for ix in range(len(self.ssd_decoder)):
             self.ssd_decoder[ix].inference_only        = mode
-            self.ssd_encoder[ix].kernel.inference_only = mode
+            self.ssd_decoder[ix].kernel.inference_only = mode
             # self.ssd_decoder[ix].kernel.requires_grad  = not mode
         self.inference_only = mode
         self.requires_grad  = not mode
@@ -77,14 +81,28 @@ class StateSpaceDiffusion(nn.Module):
     def init_ssd_layers(self):
         ssd_encoder = []  # First N - 1 Layers
         ssd_decoder = []  # Last  Nth layer
-
-        for idx, config in self.ssd_layer_config.items():
-            if int(idx) < len(self.ssd_layer_config.items()) - 1:
-                ssd_encoder.append(SSDLayer(**config))
-            else:
-                ssd_decoder.append(SSDLayer(**config))
-
+        
+        # Can refactor this with YAML list
+        if len(self.ssd_layer_config.layers.items()) == 1:
+            # Init encoder
+            ssd_encoder = [IdentitySSDLayer()]  # nn.Identity()
+            # Init decoder
+            for idx, config in self.ssd_layer_config.layers.items():
+                try:
+                    ssd_decoder = [SSDLayer(**config)]
+                except Exception as e:
+                    print(idx)
+                    print(config)
+                    raise e
+        else:
+            for idx, config in self.ssd_layer_config.layers.items():
+                if int(idx) < len(self.ssd_layer_config.layers.items()) - 1:
+                    ssd_encoder.append(SSDLayer(**config))
+                else:
+                    ssd_decoder.append(SSDLayer(**config))
+        # Init encoder
         ssd_encoder = OurSequential(*ssd_encoder)
+        # Init decoder
         ssd_decoder = OurSequential(*ssd_decoder)
         return ssd_encoder, ssd_decoder
     
@@ -101,11 +119,12 @@ class StateSpaceDiffusion(nn.Module):
         y, y_, u_ = None, None, None  # Initialize outputs
         
         u = self.input_embedding(u)  # B, C, H, W -> B, (LT), (NC * 2); i.e., (B, L, D)
-        
+        # print('after embedding', u.shape)
         u = self.input_encoder(u)    # B, L, D -> B, L, D
-        
+        # print('after encoder',u.shape)
         # Compute SSD outputs
         z, *z_ = self.ssd_encoder(u)
+        # print('after ssd_encoder', z.shape)
         # if self.inference_only:
         #     y, *_ = self.ssd_decoder(z)
         #     # y, y_, z_pred = self.ssd_decoder(z)
@@ -132,6 +151,14 @@ class SSD(StateSpaceDiffusion):
     # Alternative reference
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        
+        
+class IdentitySSDLayer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, x):
+        return x, None, None
 
 
 class OurSequential(nn.Sequential):

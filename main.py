@@ -184,9 +184,15 @@ def main():
                 #      noise_var[..., :args.timesteps-1])
                 #     for ix in range(len(data_indices) // args.batch_size)
                 # ]
+                # dataloader = [
+                #     (noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., 1:args.timesteps], 
+                #      noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., :args.timesteps-1],
+                #      noise_var[..., :args.timesteps-1])
+                #     for ix in range(len(data_indices) // args.batch_size)
+                # ]
                 dataloader = [
-                    (noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., 1:args.timesteps], 
-                     noisy[ix * args.batch_size: (ix + 1) * args.batch_size][..., :args.timesteps-1],
+                    ((noise * noise_var)[ix * args.batch_size: (ix + 1) * args.batch_size][..., 1:args.timesteps], 
+                     means[ix * args.batch_size: (ix + 1) * args.batch_size][..., 1:args.timesteps],
                      noise_var[..., :args.timesteps-1])
                     for ix in range(len(data_indices) // args.batch_size)
                 ]

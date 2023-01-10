@@ -22,10 +22,10 @@ def evaluate(model, **kwargs):
 def run_epoch(model, train, dataloader, optimizer, criterion, criterion_weights, beta_weight_loss, device):
         
     total_loss = {'y_co': 0, 'z_co': 0, 'y_ct': 0, 'y_ot': 0}
-    pbar = tqdm(enumerate(dataloader), leave=False)
+    pbar = tqdm(dataloader, leave=False)
     
     # data is zip(inputs, means)
-    for batch_ix, data in pbar:
+    for batch_ix, data in enumerate(pbar):
         u, y, v = data
         
         # Get correct reverse process ordering
@@ -46,14 +46,14 @@ def run_epoch(model, train, dataloader, optimizer, criterion, criterion_weights,
         
         if train and not model.inference_only:  # Compute 4 MSE Losses
             # Alignment between closed-loop and open-loop computations
-            loss_y_co = criterion(y_c[:, :, :], y_o[:, :, :])
-            loss_z_co = criterion(z_c[:, :, :], z_o[:, :, :])
+            loss_y_co = criterion(y_c[:, model.d_kernel_decoder-1:, :], y_o[:, model.d_kernel_decoder-1:, :])
+            loss_z_co = criterion(z_c[:, model.d_kernel_decoder-1:, :], z_o[:, model.d_kernel_decoder-1:, :])
             
             if beta_weight_loss:
                 loss_y_co = oe.contract('b l d, l -> b l d', 
-                                        loss_y_co, v).mean()
+                                        loss_y_co, v[model.d_kernel_decoder-1:]).mean()
                 loss_z_co = oe.contract('b l d, l -> b l d', 
-                                        loss_z_co, v).mean()
+                                        loss_z_co, v[model.d_kernel_decoder-1:]).mean()
             else:
                 loss_y_co = loss_y_co.mean()
                 loss_z_co = loss_z_co.mean()
@@ -69,20 +69,20 @@ def run_epoch(model, train, dataloader, optimizer, criterion, criterion_weights,
         y_c = model.input_embedding.unpatch(y_c)
         end_unpatch = time.time()
         
-        loss_y_ct = criterion(y_c, y)  # d_state - 1
+        loss_y_ct = criterion(y_c[..., model.d_kernel_decoder-1:], y[..., model.d_kernel_decoder-1:])  # d_state - 1
         if beta_weight_loss:
             loss_y_ct = oe.contract('b c h w t, t -> b c h w t', 
-                                    loss_y_ct, v).mean()
+                                    loss_y_ct, v[model.d_kernel_decoder-1:]).mean()
         else:
             loss_y_ct = loss_y_ct.mean()
         
         if not model.inference_only:
             y_o = model.input_embedding.unpatch(y_o)      
-            loss_y_ot = criterion(y_o, y)
+            loss_y_ot = criterion(y_o[..., model.d_kernel_decoder-1:], y[..., model.d_kernel_decoder-1:])
             
             if beta_weight_loss:
                 loss_y_ot = oe.contract('b c h w t, t -> b c h w t', 
-                                        loss_y_ot, v).mean()
+                                        loss_y_ot, v[model.d_kernel_decoder-1:]).mean()
             else:
                 loss_y_ot = loss_y_ot.mean()
         else:

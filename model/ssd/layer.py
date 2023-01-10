@@ -47,13 +47,15 @@ class SSDLayer(nn.Module):
         
     def forward(self, u, y_=None, u_=None):  # 
         # Assume input shape is (B, L, H)
+
         try:
-            u     = rearrange(u, 'b l h -> b h l')
+            u = rearrange(u, 'b l h -> b h l')
         except Exception as e:
             print(type(u))
             print(u)
             raise e
             
+
         y, *z = self.kernel(u)  # could output multiple, so should modify this
         y     = rearrange(y, 'b h l -> b l h')
         y     = self.decoder(y)

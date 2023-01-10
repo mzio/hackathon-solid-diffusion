@@ -45,9 +45,13 @@ class ModelEmbedding(nn.Module):
                 
             kwargs = {'n_positions': n_positions,
                       'output_dim': embedding_dim}
-            for k, v in self.position_kwargs['kwargs']:
-                kwargs[k] = v
+            try:
+                for k, v in self.position_kwargs['kwargs']:
+                    kwargs[k] = v
+            except:
+                pass
             self.position_embedding = get_position_embedding(self.position_kwargs['type'], **kwargs)
+            
             # self.position_embedding = PositionEmbedding(n_positions, embedding_dim)
             self.init_position = True
             
@@ -84,7 +88,7 @@ class ModelEmbedding(nn.Module):
             
         if self.bidirectional:
             x_r = torch.flip(x, [4])  # Reverse each unrolled patch
-            x   = rearrange([x, x_r], 'r b c n t l -> b c (n r) t l')
+            x   = rearrange([x, x_r], 'r b c n t l d -> b c (n r) t l x')
             
         if self.output_shape == 'bt(cnl)':
             x = rearrange(x, 'b c n t l -> b t (c n l)')
