@@ -120,7 +120,7 @@ image_transform = transforms.Compose(
 )
 
 def get_transform(samples, image_transform, 
-                  text_tokenizer, text_encoder,
+                  tokenizer, text_encoder,
                   guided=True):
     # Process images
     images = [image_transform(image.convert("RGB")) for image in samples["image"]]
@@ -417,9 +417,9 @@ class SSD(nn.Module):
         for ix, layer_config in enumerate(self.rollout_config):
             rollout.append(SSDLayer(**layer_config.layer))
             
-        encoder = OurSequential(*encoder)
-        decoder = OurSequential(*decoder)
-        rollout = OurSequential(*rollout)
+        encoder = nn.Sequential(*encoder)
+        decoder = nn.Sequential(*decoder)
+        rollout = nn.Sequential(*rollout)
         
         return encoder, decoder, rollout
         
@@ -493,7 +493,7 @@ class ModelEmbedding(nn.Module):
         if self.bidirectional:
             x_r = torch.flip(x, [4])
             x = rearrange([x, x_r], 'r b c n t l d -> b c (n r) t l d')
-        x = rearrange(_u, 'b c n t l d -> b (t l) (c n d)')
+        x = rearrange(x, 'b c n t l d -> b (t l) (c n d)')
         return x
     
     
@@ -573,13 +573,15 @@ def run_epoch(model, autoencoder, train, epoch, dataloader, scheduler,
     model.zero_grad()
     pbar = tqdm(dataloader, leave=False)
     
+    T = scheduler.T
+    
     for ix, data in enumerate(pbar):
         images = data['image']
         texts = data['text']
         text_embeddings = data['text_embedding']
 
         # Encode inputs
-        encoded_inputs = image_encode(data['image'], vae, return_stat='mode', device=device)
+        encoded_inputs = image_encode(data['image'], autoencoder, return_stat='mode', device=device)
         encoded_inputs = encoded_inputs.cpu()
 
         # Run forward diffusion on latent inputs
@@ -641,7 +643,7 @@ def run_epoch(model, autoencoder, train, epoch, dataloader, scheduler,
             n_samples = y_c.shape[0]
             n_steps = len(steps)
             for step in steps:
-                decoded_inputs = image_decode(y_c[..., step], vae,
+                decoded_inputs = image_decode(y_c[..., step], autoencoder,
                                               config.autoencoder.mean,
                                               config.autoencoder.std, 
                                               device)
@@ -730,7 +732,7 @@ def main():
     type: repeat
     kwargs:
       input_dim: 1024
-      output_dim: {1024 * 4}
+      output_dim: {1024 * 2}
       input_shape: bld
     """
     input_encoder_config = OmegaConf.create(input_encoder_config)
@@ -739,7 +741,7 @@ def main():
     input_decoder_config = f"""
     type: dense
     kwargs:
-      input_dim: {1024 * 4} 
+      input_dim: {1024} 
       output_dim: 1024
       activation: gelu
       n_layers: 2
@@ -755,7 +757,7 @@ def main():
           type: companion
           kwargs:
             d_kernel: 16
-            n_heads: {1024 * 4}
+            n_heads: {1024 * 2}
             n_channels: 1
             skip_connection: true
             closed_loop: false
@@ -763,8 +765,8 @@ def main():
         decoder:
           type: dense
           kwargs:
-            input_dim: {1024 * 4}
-            output_dim: {1024 * 4}
+            input_dim: {1024 * 2}
+            output_dim: {1024 * 1}
             activation: gelu
             n_layers: 2
             n_activations: 1
@@ -775,7 +777,7 @@ def main():
           type: companion
           kwargs:
             d_kernel: 16
-            n_heads: {1024 * 4}
+            n_heads: {1024 * 1}
             n_channels: 1
             skip_connection: true
             closed_loop: false
@@ -783,8 +785,8 @@ def main():
         decoder:
           type: dense
           kwargs:
-            input_dim: {1024 * 4}
-            output_dim: {1024 * 4}
+            input_dim: {1024 * 1}
+            output_dim: {512}
             activation: gelu
             n_layers: 2
             n_activations: 1
@@ -800,7 +802,7 @@ def main():
           type: companion
           kwargs:
             d_kernel: 16
-            n_heads: {1024 * 4}
+            n_heads: {512}
             n_channels: 1
             skip_connection: true
             closed_loop: false
@@ -808,8 +810,8 @@ def main():
         decoder:
           type: dense
           kwargs:
-            input_dim: {1024 * 4}
-            output_dim: {1024 * 4}
+            input_dim: {512}
+            output_dim: {1024}
             activation: gelu
             n_layers: 2
             n_activations: 1
@@ -820,7 +822,7 @@ def main():
           type: companion
           kwargs:
             d_kernel: 16
-            n_heads: {1024 * 4}
+            n_heads: {1024}
             n_channels: 1
             skip_connection: true
             closed_loop: false
@@ -828,8 +830,8 @@ def main():
         decoder:
           type: identity
           kwargs:
-            input_dim: {1024 * 4}
-            output_dim: {1024 * 4}
+            input_dim: {1024}
+            output_dim: {1024 * 2}
         skip_connection: false
         closed_loop: false
     """
@@ -842,7 +844,7 @@ def main():
           type: shift
           kwargs:
             d_kernel: 16
-            n_heads: {1024 * 4}
+            n_heads: {512}
             n_channels: 1
             n_hidden_state: 1
             skip_connection: false
@@ -851,8 +853,8 @@ def main():
         decoder:
           type: identity
           kwargs:
-            input_dim: {1024 * 4}
-            output_dim: {1024 * 4}
+            input_dim: {512}
+            output_dim: {512}
         skip_connection: false
         closed_loop: True
     """
