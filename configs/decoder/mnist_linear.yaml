@@ -1,0 +1,8 @@
+type: dense
+kwargs:
+  input_dim: 784
+  output_dim: 784
+  activation: gelu
+  n_layers: 1
+  n_activations: 0
+  input_shape: bld

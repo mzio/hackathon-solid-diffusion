@@ -1,0 +1,23 @@
+layers:
+  0:
+    kernel:
+      type: shift
+      kwargs:
+        d_kernel: 8
+        n_heads: 784
+        n_channels: 1
+        skip_connection: false
+        closed_loop: true
+        train: true
+        n_hidden_state: 1
+    decoder:
+      type: dense
+      kwargs:
+        input_dim: 784
+        output_dim: 784
+        activation: gelu
+        n_layers: 2
+        n_activations: 1
+    skip_connection: false
+    closed_loop: true
+    
